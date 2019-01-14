@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/overflow_toggle_map_list"
+        android:title="@string/lbl_edit_account"
+        app:actionLayout="@layout/action_layout_toggle_discover"
+        app:showAsAction="always" />
+</menu>

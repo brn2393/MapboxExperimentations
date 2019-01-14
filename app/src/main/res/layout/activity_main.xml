@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:mapbox="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".MainActivity">
+
+    <com.mapbox.mapboxsdk.maps.MapView
+        android:id="@+id/mapView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        mapbox:mapbox_cameraTargetLat="18.486975"
+        mapbox:mapbox_cameraTargetLng="73.857021"
+        mapbox:mapbox_cameraZoom="16"
+        mapbox:mapbox_styleUrl="mapbox://styles/mapbox/streets-v11" />
+
+    <LinearLayout
+        android:id="@+id/ll_mapview_toggle_parent"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentEnd="true"
+        android:layout_alignParentRight="true"
+        android:layout_marginTop="@dimen/padding_8dp"
+        android:layout_marginRight="@dimen/padding_8dp"
+        android:padding="@dimen/padding_1dp">
+
+        <android.support.v7.widget.CardView
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/height_55dp"
+            app:cardCornerRadius="@dimen/radius_8dp"
+            app:cardPreventCornerOverlap="true"
+            app:cardUseCompatPadding="true">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:layout_gravity="center"
+                android:gravity="center"
+                android:orientation="horizontal"
+                android:paddingStart="@dimen/padding_10dp"
+                android:paddingEnd="@dimen/padding_10dp"
+                android:visibility="visible">
+
+                <ImageButton
+                    android:id="@+id/btn_show_local_view"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:layout_marginLeft="@dimen/margin_3dp"
+                    android:layout_marginRight="@dimen/margin_3dp"
+                    android:background="@android:color/white"
+                    android:src="@drawable/ic_my_location_blue" />
+
+                <View
+                    android:layout_width="@dimen/width_1dp"
+                    android:layout_height="match_parent"
+                    android:layout_marginStart="@dimen/margin_8dp"
+                    android:layout_marginTop="@dimen/margin_8dp"
+                    android:layout_marginEnd="@dimen/margin_8dp"
+                    android:layout_marginRight="@dimen/margin_8dp"
+                    android:layout_marginBottom="@dimen/margin_8dp"
+                    android:background="@android:color/darker_gray" />
+
+                <ImageButton
+                    android:id="@+id/btn_show_map_view"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:layout_marginLeft="@dimen/margin_3dp"
+                    android:layout_marginRight="@dimen/margin_3dp"
+                    android:background="@android:color/white"
+                    android:src="@drawable/ic_public_gray" />
+            </LinearLayout>
+        </android.support.v7.widget.CardView>
+    </LinearLayout>
+</RelativeLayout>

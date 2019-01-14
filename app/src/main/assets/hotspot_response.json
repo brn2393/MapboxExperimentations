@@ -1,0 +1,8 @@
+{
+  "success": true,
+  "message": "Hotspot locations successful.",
+  "data": {
+    "heatmap_points": "{\"type\":\"FeatureCollection\",\"features\":[{\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[73.8569723,18.4870082]},\"properties\":{\"intensity\":1}},{\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[73.8549,18.486849]},\"properties\":{\"intensity\":1}},{\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[73.8572,18.4867983]},\"properties\":{\"intensity\":1}},{\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[73.8569043,18.4869823]},\"properties\":{\"intensity\":1}}]}",
+    "hotspots": []
+  }
+}
