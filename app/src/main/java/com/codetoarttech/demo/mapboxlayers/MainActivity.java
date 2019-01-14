@@ -7,6 +7,7 @@ import android.graphics.Color;
 import android.location.Location;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.support.annotation.NonNull;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.Menu;
@@ -47,6 +48,8 @@ import com.mapbox.mapboxsdk.style.sources.Source;
 import com.tbruyelle.rxpermissions2.RxPermissions;
 
 import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -86,6 +89,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private boolean isCameraMoving = false;
     private boolean circleVisibilty = true;
     private Set<FutureTarget<Bitmap>> futureTargetSet;
+    private Set<Marker> markerSet;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -110,6 +114,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         mapView.getMapAsync(this);
         compositeDisposable = new CompositeDisposable();
         futureTargetSet = new HashSet<>();
+        markerSet = new HashSet<>();
         setupObjectMapper();
         setupLocationProvider();
         setupPermissionHelper();
@@ -229,57 +234,25 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private void setupResponsesFromAssets() {
         Log.i(TAG, "init: " + SystemClock.elapsedRealtime());
         mapboxMap.clear();
+        futureTargetSet.clear();
         compositeDisposable.add(Observable.just("discover_response.json")
                 .subscribeOn(Schedulers.io())
-                .doOnSubscribe(disposable -> Log.d(TAG, "setupResponsesFromAssets: doOnSubscribe: " + Thread.currentThread().getName()))
+                .doOnSubscribe(disposable -> Log.d(TAG, "setupResponsesFromAssets: doOnSubscribe: "
+                        + Thread.currentThread().getName()))
                 .observeOn(Schedulers.io())
-                .map(input -> {
-                    Log.d(TAG, "setupResponsesFromAssets: " + Thread.currentThread().getName());
-                    return getAssets().open(input);
-                })
-                .map(input -> {
-                    Log.d(TAG, "setupResponsesFromAssets: " + Thread.currentThread().getName());
-                    BufferedReader r = new BufferedReader(new InputStreamReader(input, "UTF-8"));
-                    StringBuilder total = new StringBuilder();
-                    for (String line; (line = r.readLine()) != null; ) {
-                        total.append(line).append('\n');
-                    }
-                    return total.toString();
-                })
+                .map(input -> getAssets().open(input))
+                .map(this::getJsonStringFromStream)
                 .map(input -> objectMapper.readValue(input, DiscoverApiResponse.class))
                 .map(DiscoverApiResponse::getDiscoveredUserList)
                 .flatMapIterable(list -> list)
-                .switchMap((Function<UserData, Observable<MarkerData>>) userData -> {
-                    FutureTarget<Bitmap> futureTarget;
-                    ImageData imageData = userData.getSelectedProfileImage();
-                    if (imageData != null && imageData.getThumb() != null) {
-                        futureTarget = Glide.with(this)
-                                .asBitmap()
-//                                .load(R.drawable.ic_phone)
-                                .load(imageData.getThumb())
-                                .apply(new RequestOptions()
-                                        .placeholder(R.drawable.ic_phone)
-                                        .transform(new CircleCropBorder()))
-                                .submit();
-                        this.futureTargetSet.add(futureTarget);
-                        MarkerData markerData = new MarkerData(futureTarget.get(), userData.getLatLng());
-                        return Observable.just(markerData);
-                    } else {
-                        return Observable.error(new Throwable("ImageData cannot be null!"));
-                    }
-
-                })
+                .switchMap((Function<UserData, Observable<MarkerData>>) this::getMarkerDataObservable)
                 .observeOn(AndroidSchedulers.mainThread())
-                .map(input -> (Marker) mapboxMap.addMarker(new MarkerOptions()
-                        .position(new LatLng(input.getLatLng()))
-                        .icon(IconFactory.getInstance(getApplicationContext()).fromBitmap(input.getBitmap()))))
+                .map(this::addMarkerWithData)
 //                .toList()
-//                .observeOn(AndroidSchedulers.mainThread())
                 .doOnComplete(() -> Log.i(TAG, "complete: " + SystemClock.elapsedRealtime()))
                 .subscribe(
                         marker -> Log.d(TAG, "subscribe: " + marker.toString()),
-                        throwable -> Log.e(TAG, "subscribe: " + throwable.getLocalizedMessage()),
-                        () -> Log.d(TAG, "subscribe: " + Thread.currentThread().getName())
+                        throwable -> Log.e(TAG, "subscribe: " + throwable.getLocalizedMessage())
                 ));
     }
 
@@ -325,9 +298,49 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         return Observable.create(handler);
     }
 
+    @NonNull
+    private String getJsonStringFromStream(InputStream input) throws IOException {
+        Log.d(TAG, "setupResponsesFromAssets: " + Thread.currentThread().getName());
+        BufferedReader r = new BufferedReader(new InputStreamReader(input, "UTF-8"));
+        StringBuilder total = new StringBuilder();
+        for (String line; (line = r.readLine()) != null; ) {
+            total.append(line).append('\n');
+        }
+        return total.toString();
+    }
+
+    @NonNull
+    private Marker addMarkerWithData(MarkerData input) {
+        Marker marker = mapboxMap.addMarker(new MarkerOptions()
+                .position(new LatLng(input.getLatLng()))
+                .icon(IconFactory.getInstance(getApplicationContext()).fromBitmap(input.getBitmap())));
+        markerSet.add(marker);
+        return marker;
+    }
+
+    private Observable<MarkerData> getMarkerDataObservable(UserData userData) throws java.util.concurrent.ExecutionException, InterruptedException {
+        FutureTarget<Bitmap> futureTarget;
+        ImageData imageData = userData.getSelectedProfileImage();
+        if (imageData != null && imageData.getThumb() != null) {
+            futureTarget = Glide.with(this)
+                    .asBitmap()
+//                    .load(R.drawable.ic_phone)
+                    .load(imageData.getThumb())
+                    .apply(new RequestOptions()
+                            .placeholder(R.drawable.ic_phone)
+                            .transform(new CircleCropBorder()))
+                    .submit();
+            this.futureTargetSet.add(futureTarget);
+            MarkerData markerData = new MarkerData(futureTarget.get(), userData.getLatLng());
+            return Observable.just(markerData);
+        } else {
+            return Observable.error(new Throwable("ImageData cannot be null!"));
+        }
+    }
+
     private void changeCircleWidth(ArrayList<Point> routeCoordinates) {
         if (mapboxMap == null) return;
-//        Log.d(TAG, "changeCircleWidth: " + Thread.currentThread().getName());
+        Log.d(TAG, "changeCircleWidth: " + Thread.currentThread().getName());
         // Create the LineString from the list of coordinates and then make a GeoJSON
         // FeatureCollection so we can add the line to our map as a layer.
         LineString lineString = LineString.fromLngLats(routeCoordinates);
