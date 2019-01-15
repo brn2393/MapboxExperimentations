@@ -205,7 +205,7 @@
     <string name="phone_not_available">Phone number not available</string>
     <string name="format_version_name">v%1$s</string>
     <string name="contact_details_not_available">Contact details not available</string>
-    <string name="lbl_no_businesses_nearby">You are currently not near any businesses. To use the check in feature, make sure you are close to at least one business (i.e. restaurants, lounges, bars, coffee shops, etc)</string>
+    <string name="lbl_no_businesses_nearby">You are currently not near any businesses. To use the check in featureArrayList, make sure you are close to at least one business (i.e. restaurants, lounges, bars, coffee shops, etc)</string>
     <string name="lbl_go_back">Go back</string>
     <string name="format_checked_in_to_">Checked in to %1$s</string>
     <string name="error_null_message">Message cannot be empty</string>

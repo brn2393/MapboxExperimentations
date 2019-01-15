@@ -8,6 +8,7 @@ import android.location.Location;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.Menu;
@@ -28,11 +29,7 @@ import com.mapbox.geojson.FeatureCollection;
 import com.mapbox.geojson.LineString;
 import com.mapbox.geojson.Point;
 import com.mapbox.mapboxsdk.Mapbox;
-import com.mapbox.mapboxsdk.annotations.IconFactory;
-import com.mapbox.mapboxsdk.annotations.Marker;
-import com.mapbox.mapboxsdk.annotations.MarkerOptions;
 import com.mapbox.mapboxsdk.camera.CameraUpdateFactory;
-import com.mapbox.mapboxsdk.constants.Style;
 import com.mapbox.mapboxsdk.geometry.LatLng;
 import com.mapbox.mapboxsdk.location.LocationComponent;
 import com.mapbox.mapboxsdk.location.modes.CameraMode;
@@ -43,6 +40,7 @@ import com.mapbox.mapboxsdk.maps.OnMapReadyCallback;
 import com.mapbox.mapboxsdk.style.layers.LineLayer;
 import com.mapbox.mapboxsdk.style.layers.Property;
 import com.mapbox.mapboxsdk.style.layers.PropertyFactory;
+import com.mapbox.mapboxsdk.style.layers.SymbolLayer;
 import com.mapbox.mapboxsdk.style.sources.GeoJsonSource;
 import com.mapbox.mapboxsdk.style.sources.Source;
 import com.tbruyelle.rxpermissions2.RxPermissions;
@@ -52,6 +50,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.Executors;
@@ -71,6 +70,10 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         MapboxMap.OnCameraIdleListener, MapboxMap.OnCameraMoveListener {
 
     private static final String TAG = "MainActivity";
+    private static final String DISCOVER_CIRCLE_SOURCE_ID = "discover_circle_source";
+    private static final String DISCOVER_CIRCLE_LAYER_ID = "discover_circle_layer";
+    private static final String DISCOVER_SYMBOL_SOURCE_ID = "discover_symbol_source";
+    private static final String DISCOVER_SYMBOL_LAYER_ID = "discover_symbol_layer";
     private MapView mapView;
     private MapboxMap mapboxMap;
     private ImageButton btnShowLocalView;
@@ -84,12 +87,13 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private CompositeDisposable compositeDisposable;
     private ObjectMapper objectMapper;
     private double currentZoom;
-    private double discoverCircleRadius = 500;
-    private double heatmapCircleRadius = 50000;
+    private double discoverCircleRadius = 100;
+    private double heatmapCircleRadius = 5000;
     private boolean isCameraMoving = false;
     private boolean circleVisibilty = true;
+    private HashMap<String, Bitmap> markerIdBitmapSet;
     private Set<FutureTarget<Bitmap>> futureTargetSet;
-    private Set<Marker> markerSet;
+    private Set<MarkerData> markerDataSet;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -97,53 +101,34 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         Mapbox.getInstance(this, getString(R.string.mapbox_access_token));
         setContentView(R.layout.activity_main);
         mapView = findViewById(R.id.mapView);
+        mapView.onCreate(savedInstanceState);
         btnShowLocalView = findViewById(R.id.btn_show_local_view);
-        btnShowMapView = findViewById(R.id.btn_show_map_view);
-        llMapviewToggleParent = findViewById(R.id.ll_mapview_toggle_parent);
         btnShowLocalView.setOnClickListener(v -> {
             landNearSurface();
             btnShowLocalView.setImageResource(R.drawable.ic_my_location_blue);
             btnShowMapView.setImageResource(R.drawable.ic_public_gray);
         });
+        btnShowMapView = findViewById(R.id.btn_show_map_view);
         btnShowMapView.setOnClickListener(v -> {
             floatAboveSurface();
             btnShowLocalView.setImageResource(R.drawable.ic_my_location_gray);
             btnShowMapView.setImageResource(R.drawable.ic_public_blue);
         });
-        mapView.onCreate(savedInstanceState);
-        mapView.getMapAsync(this);
+        llMapviewToggleParent = findViewById(R.id.ll_mapview_toggle_parent);
         compositeDisposable = new CompositeDisposable();
+        markerIdBitmapSet = new HashMap<>();
         futureTargetSet = new HashSet<>();
-        markerSet = new HashSet<>();
+        markerDataSet = new HashSet<>();
         setupObjectMapper();
         setupLocationProvider();
         setupPermissionHelper();
+    }
+
+    @Override
+    protected void onPostCreate(@Nullable Bundle savedInstanceState) {
+        super.onPostCreate(savedInstanceState);
+        mapView.getMapAsync(this);
         requestLocationPermission();
-    }
-
-    private void setupObjectMapper() {
-        this.objectMapper = new ObjectMapper()
-                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-    }
-
-    private void landNearSurface() {
-        if (mapboxMap == null || currentLocation == null) return;
-        mapboxMap.animateCamera(CameraUpdateFactory.newLatLngZoom(currentLocation, getZoomByRadius(discoverCircleRadius)));
-    }
-
-    public int getZoomByRadius(double radius) {
-        int zoomLevel = 13;
-        if (radius != 0) {
-            radius = radius + radius / 2;
-            double scale = radius / 500;
-            zoomLevel = (int) (15 - Math.log(scale) / Math.log(2));
-        }
-        return zoomLevel;
-    }
-
-    private void floatAboveSurface() {
-        if (mapboxMap == null || currentLocation == null) return;
-        mapboxMap.animateCamera(CameraUpdateFactory.newLatLngZoom(currentLocation, getZoomByRadius(heatmapCircleRadius)));
     }
 
     @Override
@@ -174,18 +159,19 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         // Must be done during an initialization phase like onCreate
         compositeDisposable.add(rxPermissions.request(Manifest.permission.ACCESS_FINE_LOCATION)
                 .subscribe(granted -> {
-                    if (granted) { // Always true pre-M
-                        setupLocationRequestObservable();
-                        requestNewLocation();
-                    } else {
-                        // permission denied
-                    }
-                }, throwable -> Log.e(TAG, "requestLocationPermission: ", throwable)));
+                            if (granted) {
+                                setupLocationRequestObservable();
+                                requestNewLocation();
+                            }
+                            Log.e(TAG, "requestLocationPermission: granted:" + granted);
+                        },
+                        throwable -> Log.e(TAG, "requestLocationPermission: ", throwable)));
     }
 
     private void setupLocationRequestObservable() {
         latestOtherwiseLastLocationObservable =
                 locationProvider.getUpdatedLocation(getLocationRequest())
+                        .subscribeOn(Schedulers.io())
                         .filter(location -> location.getAccuracy() < 50)
                         .timeout(15, TimeUnit.SECONDS,
                                 AndroidSchedulers.mainThread(), locationProvider.getLastKnownLocation())
@@ -210,6 +196,41 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                 .subscribe(this::useNewLocationValue));
     }
 
+    private void setupObjectMapper() {
+        this.objectMapper = new ObjectMapper()
+                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    }
+
+    private void landNearSurface() {
+        if (mapboxMap == null || currentLocation == null) return;
+        SymbolLayer symbolLayer = mapboxMap.getLayerAs(DISCOVER_SYMBOL_LAYER_ID);
+        if (symbolLayer != null) {
+            symbolLayer.withProperties(PropertyFactory.visibility(Property.VISIBLE));
+        }
+        mapboxMap.animateCamera(CameraUpdateFactory.newLatLngZoom(currentLocation,
+                getZoomByRadius(discoverCircleRadius)));
+    }
+
+    public int getZoomByRadius(double radius) {
+        int zoomLevel = 13;
+        if (radius != 0) {
+            radius = radius + radius / 2;
+            double scale = radius / 500;
+            zoomLevel = (int) (16 - Math.log(scale) / Math.log(2));
+        }
+        return zoomLevel;
+    }
+
+    private void floatAboveSurface() {
+        if (mapboxMap == null || currentLocation == null) return;
+        SymbolLayer symbolLayer = mapboxMap.getLayerAs(DISCOVER_SYMBOL_LAYER_ID);
+        if (symbolLayer != null) {
+            symbolLayer.withProperties(PropertyFactory.visibility(Property.NONE));
+        }
+        mapboxMap.animateCamera(CameraUpdateFactory.newLatLngZoom(currentLocation,
+                getZoomByRadius(heatmapCircleRadius)));
+    }
+
     private void setupLocationProvider() {
         locationProvider = new ReactiveLocationProvider(this);
     }
@@ -229,31 +250,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
             mapboxMap.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, currentZoom));
         }
         setupResponsesFromAssets();
-    }
-
-    private void setupResponsesFromAssets() {
-        Log.i(TAG, "init: " + SystemClock.elapsedRealtime());
-        mapboxMap.clear();
-        futureTargetSet.clear();
-        compositeDisposable.add(Observable.just("discover_response.json")
-                .subscribeOn(Schedulers.io())
-                .doOnSubscribe(disposable -> Log.d(TAG, "setupResponsesFromAssets: doOnSubscribe: "
-                        + Thread.currentThread().getName()))
-                .observeOn(Schedulers.io())
-                .map(input -> getAssets().open(input))
-                .map(this::getJsonStringFromStream)
-                .map(input -> objectMapper.readValue(input, DiscoverApiResponse.class))
-                .map(DiscoverApiResponse::getDiscoveredUserList)
-                .flatMapIterable(list -> list)
-                .switchMap((Function<UserData, Observable<MarkerData>>) this::getMarkerDataObservable)
-                .observeOn(AndroidSchedulers.mainThread())
-                .map(this::addMarkerWithData)
-//                .toList()
-                .doOnComplete(() -> Log.i(TAG, "complete: " + SystemClock.elapsedRealtime()))
-                .subscribe(
-                        marker -> Log.d(TAG, "subscribe: " + marker.toString()),
-                        throwable -> Log.e(TAG, "subscribe: " + throwable.getLocalizedMessage())
-                ));
     }
 
     private void createCircleWithPolygon(double meterRadius, LatLng latLng) {
@@ -298,9 +294,36 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         return Observable.create(handler);
     }
 
+    private void setupResponsesFromAssets() {
+        Log.i(TAG, "init: " + SystemClock.elapsedRealtime());
+//        mapboxMap.clear();
+        futureTargetSet.clear();
+        compositeDisposable.add(Observable.just("discover_response.json")
+                .subscribeOn(Schedulers.io())
+                .observeOn(Schedulers.io())
+                .map(input -> getAssets().open(input))
+                .map(this::getJsonStringFromStream)
+                .map(input -> objectMapper.readValue(input, DiscoverApiResponse.class))
+                .map(DiscoverApiResponse::getDiscoveredUserList)
+                .flatMapIterable(list -> list)
+                .switchMap((Function<UserData, Observable<MarkerData>>) this::getMarkerDataObservable)
+                .map(this::buildFeatureWithData)
+                .toList()
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(featureSet -> {
+                    GeoJsonSource geoJsonSource = mapboxMap.getSourceAs(DISCOVER_SYMBOL_SOURCE_ID);
+                    if (geoJsonSource != null) {
+                        geoJsonSource.setGeoJson(FeatureCollection.fromFeatures(featureSet));
+                    }
+                    mapboxMap.addImages(markerIdBitmapSet);
+                    Log.i(TAG, "getAnnotations " + mapboxMap.getAnnotations().size());
+                    Log.i(TAG, "getLayers " + mapboxMap.getLayers().size());
+                    Log.i(TAG, "getSources " + mapboxMap.getSources().size());
+                }, throwable -> Log.e(TAG, throwable.getLocalizedMessage())));
+    }
+
     @NonNull
     private String getJsonStringFromStream(InputStream input) throws IOException {
-        Log.d(TAG, "setupResponsesFromAssets: " + Thread.currentThread().getName());
         BufferedReader r = new BufferedReader(new InputStreamReader(input, "UTF-8"));
         StringBuilder total = new StringBuilder();
         for (String line; (line = r.readLine()) != null; ) {
@@ -310,28 +333,27 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
     @NonNull
-    private Marker addMarkerWithData(MarkerData input) {
-        Marker marker = mapboxMap.addMarker(new MarkerOptions()
-                .position(new LatLng(input.getLatLng()))
-                .icon(IconFactory.getInstance(getApplicationContext()).fromBitmap(input.getBitmap())));
-        markerSet.add(marker);
-        return marker;
+    private Feature buildFeatureWithData(MarkerData input) {
+        Feature feature = Feature.fromGeometry(Point.fromLngLat(input.getLng(), input.getLat()));
+        feature.addStringProperty("icon_id", String.valueOf(input.getId()));
+        return feature;
     }
 
     private Observable<MarkerData> getMarkerDataObservable(UserData userData) throws java.util.concurrent.ExecutionException, InterruptedException {
         FutureTarget<Bitmap> futureTarget;
         ImageData imageData = userData.getSelectedProfileImage();
         if (imageData != null && imageData.getThumb() != null) {
-            futureTarget = Glide.with(this)
+            futureTarget = Glide.with(MainActivity.this)
                     .asBitmap()
-//                    .load(R.drawable.ic_phone)
                     .load(imageData.getThumb())
                     .apply(new RequestOptions()
                             .placeholder(R.drawable.ic_phone)
                             .transform(new CircleCropBorder()))
                     .submit();
             this.futureTargetSet.add(futureTarget);
-            MarkerData markerData = new MarkerData(futureTarget.get(), userData.getLatLng());
+            MarkerData markerData = new MarkerData(userData.getId(), futureTarget.get(), userData.getLatLng());
+            this.markerIdBitmapSet.put(String.valueOf(markerData.getId()), markerData.getBitmap());
+            this.markerDataSet.add(markerData);
             return Observable.just(markerData);
         } else {
             return Observable.error(new Throwable("ImageData cannot be null!"));
@@ -340,22 +362,22 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
     private void changeCircleWidth(ArrayList<Point> routeCoordinates) {
         if (mapboxMap == null) return;
-        Log.d(TAG, "changeCircleWidth: " + Thread.currentThread().getName());
+//        Log.d(TAG, "changeCircleWidth: " + Thread.currentThread().getName());
         // Create the LineString from the list of coordinates and then make a GeoJSON
         // FeatureCollection so we can add the line to our map as a layer.
         LineString lineString = LineString.fromLngLats(routeCoordinates);
         FeatureCollection featureCollection =
                 FeatureCollection.fromFeatures(new Feature[]{Feature.fromGeometry(lineString)});
-        Source source = mapboxMap.getSource("line-source");
-        LineLayer layer = (LineLayer) mapboxMap.getLayer("line-layer");
+        GeoJsonSource source = mapboxMap.getSourceAs(DISCOVER_CIRCLE_SOURCE_ID);
+        LineLayer layer = (LineLayer) mapboxMap.getLayer(DISCOVER_CIRCLE_LAYER_ID);
         if (source != null) {
-            ((GeoJsonSource) source).setGeoJson(featureCollection);
+            source.setGeoJson(featureCollection);
         } else {
-            Source geoJsonSource = new GeoJsonSource("line-source", featureCollection);
+            GeoJsonSource geoJsonSource = new GeoJsonSource(DISCOVER_CIRCLE_SOURCE_ID, featureCollection);
             mapboxMap.addSource(geoJsonSource);
         }
         if (layer == null) {
-            LineLayer lineLayer = new LineLayer("line-layer", "line-source");
+            LineLayer lineLayer = new LineLayer(DISCOVER_CIRCLE_LAYER_ID, DISCOVER_CIRCLE_SOURCE_ID);
             // The layer properties for our line. This is where we make the line dotted, set the
             // color, etc.
             lineLayer.setProperties(
@@ -397,13 +419,28 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     @Override
     public void onMapReady(MapboxMap mapboxMap) {
         this.mapboxMap = mapboxMap;
-        this.mapboxMap.setStyle(Style.MAPBOX_STREETS, style -> setupMapActiveComponent());
+        setupMapActiveComponent();
         this.mapboxMap.setMinZoomPreference(8);
         this.mapboxMap.getUiSettings().setCompassEnabled(false);
         this.mapboxMap.getUiSettings().setRotateGesturesEnabled(false);
         this.mapboxMap.addOnCameraMoveListener(this);
         this.mapboxMap.addOnCameraIdleListener(this);
-        setupResponsesFromAssets();
+        setupDiscoverSymbolSource();
+        setupDiscoverSymbolLayer();
+    }
+
+    private void setupDiscoverSymbolSource() {
+        Source geoJsonSource = new GeoJsonSource(DISCOVER_SYMBOL_SOURCE_ID);
+        mapboxMap.addSource(geoJsonSource);
+    }
+
+    private void setupDiscoverSymbolLayer() {
+        SymbolLayer symbolLayer = new SymbolLayer(DISCOVER_SYMBOL_LAYER_ID, DISCOVER_SYMBOL_SOURCE_ID);
+        symbolLayer.withProperties(
+                PropertyFactory.iconImage("{icon_id}"),
+                PropertyFactory.iconAllowOverlap(true)
+        );
+        mapboxMap.addLayer(symbolLayer);
     }
 
     private void setupMapActiveComponent() {
@@ -413,17 +450,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
             locationComponent.setLocationComponentEnabled(true);
             locationComponent.setCameraMode(CameraMode.TRACKING);
             locationComponent.setRenderMode(RenderMode.NORMAL);
-        } else {
-            compositeDisposable.add(rxPermissions.request(Manifest.permission.ACCESS_FINE_LOCATION)
-                    .subscribe(granted -> {
-                        if (granted) {
-                            setupLocationRequestObservable();
-                            requestNewLocation();
-                            setupMapActiveComponent();
-                        } else {
-                            // permission denied
-                        }
-                    }, throwable -> Log.e(TAG, "setupMapActiveComponent: ", throwable)));
         }
     }
 
@@ -450,6 +476,9 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     public void onResume() {
         super.onResume();
         if (mapView != null) mapView.onResume();
+        if (latestOtherwiseLastLocationObservable != null && locationProvider != null) {
+            requestNewLocation();
+        }
     }
 
     @Override

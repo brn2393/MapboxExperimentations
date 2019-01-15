@@ -5,8 +5,6 @@ import android.os.Parcelable;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.util.Objects;
-
 public class ImageData implements Parcelable {
 
     public static final Creator<ImageData> CREATOR = new Creator<ImageData>() {
@@ -74,21 +72,29 @@ public class ImageData implements Parcelable {
 
     @Override
     public int hashCode() {
-
-        return Objects.hash(thumb, main, original, id, position, isSelected);
+        int result = thumb != null ? thumb.hashCode() : 0;
+        result = 31 * result + (main != null ? main.hashCode() : 0);
+        result = 31 * result + (original != null ? original.hashCode() : 0);
+        result = 31 * result + id.hashCode();
+        result = 31 * result + (position != null ? position.hashCode() : 0);
+        result = 31 * result + (isSelected ? 1 : 0);
+        return result;
     }
 
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
+
         ImageData imageData = (ImageData) o;
-        return isSelected == imageData.isSelected &&
-                thumb.equals(imageData.thumb) &&
-                main.equals(imageData.main) &&
-                original.equals(imageData.original) &&
-                id.equals(imageData.id) &&
-                position.equals(imageData.position);
+
+        if (isSelected != imageData.isSelected) return false;
+        if (thumb != null ? !thumb.equals(imageData.thumb) : imageData.thumb != null) return false;
+        if (main != null ? !main.equals(imageData.main) : imageData.main != null) return false;
+        if (original != null ? !original.equals(imageData.original) : imageData.original != null)
+            return false;
+        if (!id.equals(imageData.id)) return false;
+        return position != null ? position.equals(imageData.position) : imageData.position == null;
     }
 
     @Override
