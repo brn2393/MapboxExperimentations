@@ -52,6 +52,7 @@ import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -80,7 +81,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private ImageButton btnShowMapView;
     private LinearLayout llMapviewToggleParent;
     private ReactiveLocationProvider locationProvider;
-    private Observable<Location> latestOtherwiseLastLocationObservable;
+    private Observable<Location> latestOrLastLocationObservable;
     private LocationRequest locationRequest;
     private LatLng currentLocation;
     private RxPermissions rxPermissions;
@@ -128,7 +129,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     protected void onPostCreate(@Nullable Bundle savedInstanceState) {
         super.onPostCreate(savedInstanceState);
         mapView.getMapAsync(this);
-        requestLocationPermission();
     }
 
     @Override
@@ -153,47 +153,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
         if (mapView != null) mapView.onSaveInstanceState(outState);
-    }
-
-    private void requestLocationPermission() {
-        // Must be done during an initialization phase like onCreate
-        compositeDisposable.add(rxPermissions.request(Manifest.permission.ACCESS_FINE_LOCATION)
-                .subscribe(granted -> {
-                            if (granted) {
-                                setupLocationRequestObservable();
-                                requestNewLocation();
-                            }
-                            Log.e(TAG, "requestLocationPermission: granted:" + granted);
-                        },
-                        throwable -> Log.e(TAG, "requestLocationPermission: ", throwable)));
-    }
-
-    private void setupLocationRequestObservable() {
-        latestOtherwiseLastLocationObservable =
-                locationProvider.getUpdatedLocation(getLocationRequest())
-                        .subscribeOn(Schedulers.io())
-                        .filter(location -> location.getAccuracy() < 50)
-                        .timeout(15, TimeUnit.SECONDS,
-                                AndroidSchedulers.mainThread(), locationProvider.getLastKnownLocation())
-//                        .firstElement()
-                        .observeOn(AndroidSchedulers.mainThread());
-    }
-
-    private LocationRequest getLocationRequest() {
-        if (locationRequest == null) {
-            locationRequest = LocationRequest.create()
-                    .setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY)
-//                    .setExpirationDuration(TimeUnit.SECONDS.toMillis(40))
-                    .setFastestInterval(5000)
-                    .setInterval(3000);
-        }
-        return locationRequest;
-    }
-
-    private void requestNewLocation() {
-        compositeDisposable.add(latestOtherwiseLastLocationObservable
-//        locationProvider.getLastKnownLocation()
-                .subscribe(this::useNewLocationValue));
     }
 
     private void setupObjectMapper() {
@@ -236,7 +195,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
     private void setupPermissionHelper() {
-        rxPermissions = new RxPermissions(this); // where this is an Activity or Fragment instance
+        rxPermissions = new RxPermissions(this);
         rxPermissions.setLogging(true);
     }
 
@@ -310,16 +269,20 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                 .map(this::buildFeatureWithData)
                 .toList()
                 .observeOn(AndroidSchedulers.mainThread())
-                .subscribe(featureSet -> {
-                    GeoJsonSource geoJsonSource = mapboxMap.getSourceAs(DISCOVER_SYMBOL_SOURCE_ID);
-                    if (geoJsonSource != null) {
-                        geoJsonSource.setGeoJson(FeatureCollection.fromFeatures(featureSet));
-                    }
-                    mapboxMap.addImages(markerIdBitmapSet);
-                    Log.i(TAG, "getAnnotations " + mapboxMap.getAnnotations().size());
-                    Log.i(TAG, "getLayers " + mapboxMap.getLayers().size());
-                    Log.i(TAG, "getSources " + mapboxMap.getSources().size());
-                }, throwable -> Log.e(TAG, throwable.getLocalizedMessage())));
+                .subscribe(this::updateDiscoverLayerSource,
+                        throwable -> Log.e(TAG, throwable.getLocalizedMessage())));
+    }
+
+    private void updateDiscoverLayerSource(List<Feature> featureSet) {
+        GeoJsonSource geoJsonSource = mapboxMap.getSourceAs(DISCOVER_SYMBOL_SOURCE_ID);
+        if (geoJsonSource != null) {
+            geoJsonSource.setGeoJson(FeatureCollection.fromFeatures(featureSet));
+        }
+        mapboxMap.addImages(markerIdBitmapSet);
+//        Log.i(TAG, "getAnnotations " + mapboxMap.getAnnotations().size());
+//        Log.i(TAG, "getLayers " + mapboxMap.getLayers().size());
+//        Log.i(TAG, "getSources " + mapboxMap.getSources().size());
+        Log.i(TAG, "complete: " + SystemClock.elapsedRealtime());
     }
 
     @NonNull
@@ -397,26 +360,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
     @Override
-    public boolean onCreateOptionsMenu(Menu menu) {
-        super.onCreateOptionsMenu(menu);
-        getMenuInflater().inflate(R.menu.main_overflow, menu);
-        MenuItem toggleItem = menu.findItem(R.id.overflow_toggle_map_list);
-        ToggleButton toggleButton = (ToggleButton) toggleItem.getActionView();
-        toggleButton.setOnCheckedChangeListener((buttonView, isChecked) -> processToggleChecked(isChecked));
-        return true;
-    }
-
-    private void processToggleChecked(boolean isChecked) {
-        if (isChecked) {
-            mapView.setVisibility(View.GONE);
-            llMapviewToggleParent.setVisibility(View.GONE);
-        } else {
-            mapView.setVisibility(View.VISIBLE);
-            llMapviewToggleParent.setVisibility(View.VISIBLE);
-        }
-    }
-
-    @Override
     public void onMapReady(MapboxMap mapboxMap) {
         this.mapboxMap = mapboxMap;
         setupMapActiveComponent();
@@ -425,8 +368,55 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         this.mapboxMap.getUiSettings().setRotateGesturesEnabled(false);
         this.mapboxMap.addOnCameraMoveListener(this);
         this.mapboxMap.addOnCameraIdleListener(this);
+        mapView.addOnDidFinishLoadingMapListener(() -> {
+            Log.i(TAG, "onDidFinishLoadingMap");
+            requestLocationPermission();
+        });
         setupDiscoverSymbolSource();
         setupDiscoverSymbolLayer();
+    }
+
+    private void requestLocationPermission() {
+        // Must be done during an initialization phase like onCreate
+        compositeDisposable.add(rxPermissions.request(Manifest.permission.ACCESS_FINE_LOCATION)
+                .subscribe(granted -> {
+                            if (granted) {
+                                setupLocationRequestObservable();
+                                requestNewLocation();
+                            }
+                            Log.e(TAG, "requestLocationPermission: granted:" + granted);
+                        },
+                        throwable -> Log.e(TAG, "requestLocationPermission: ", throwable)));
+    }
+
+    private void setupLocationRequestObservable() {
+        latestOrLastLocationObservable =
+                locationProvider.getUpdatedLocation(getLocationRequest())
+                        .subscribeOn(Schedulers.io())
+                        .filter(location -> location.getAccuracy() < 100)
+                        .debounce(6, TimeUnit.SECONDS)
+//                        .distinctUntilChanged()
+                        .timeout(15, TimeUnit.SECONDS,
+                                AndroidSchedulers.mainThread(), locationProvider.getLastKnownLocation())
+//                        .firstElement()
+                        .observeOn(AndroidSchedulers.mainThread());
+    }
+
+    private LocationRequest getLocationRequest() {
+        if (locationRequest == null) {
+            locationRequest = LocationRequest.create()
+                    .setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY)
+//                    .setExpirationDuration(TimeUnit.SECONDS.toMillis(40))
+                    .setFastestInterval(9000)
+                    .setInterval(10000);
+        }
+        return locationRequest;
+    }
+
+    private void requestNewLocation() {
+        compositeDisposable.add(latestOrLastLocationObservable
+//        locationProvider.getLastKnownLocation()
+                .subscribe(this::useNewLocationValue));
     }
 
     private void setupDiscoverSymbolSource() {
@@ -476,8 +466,36 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     public void onResume() {
         super.onResume();
         if (mapView != null) mapView.onResume();
-        if (latestOtherwiseLastLocationObservable != null && locationProvider != null) {
+    }
+
+    @Override
+    protected void onRestart() {
+        super.onRestart();
+        Log.i(TAG, "onRestart");
+        if (locationProvider != null && latestOrLastLocationObservable != null) {
             requestNewLocation();
+        } else if (!rxPermissions.isGranted(Manifest.permission.ACCESS_FINE_LOCATION)) {
+            requestLocationPermission();
+        }
+    }
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        super.onCreateOptionsMenu(menu);
+        getMenuInflater().inflate(R.menu.main_overflow, menu);
+        MenuItem toggleItem = menu.findItem(R.id.overflow_toggle_map_list);
+        ToggleButton toggleButton = (ToggleButton) toggleItem.getActionView();
+        toggleButton.setOnCheckedChangeListener((buttonView, isChecked) -> processToggleChecked(isChecked));
+        return true;
+    }
+
+    private void processToggleChecked(boolean isChecked) {
+        if (isChecked) {
+            mapView.setVisibility(View.GONE);
+            llMapviewToggleParent.setVisibility(View.GONE);
+        } else {
+            mapView.setVisibility(View.VISIBLE);
+            llMapviewToggleParent.setVisibility(View.VISIBLE);
         }
     }
 
